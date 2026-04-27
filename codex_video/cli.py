@@ -34,8 +34,40 @@ DEFAULT_TAGLINE = "Text the work. Leave the desk. Get the result back."
 DEFAULT_SPEACHES_URL = "http://127.0.0.1:8000/v1"
 DEFAULT_SPEACHES_MODEL = "speaches-ai/Kokoro-82M-v1.0-ONNX"
 DEFAULT_SPEACHES_VOICE = "af_heart"
+DEFAULT_MEDIA_DIR = Path("media")
+DEFAULT_MUSIC_VOLUME = 0.16
 
 SUPPORTED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+SUPPORTED_AUDIO_EXTENSIONS = {".mp3", ".m4a", ".wav", ".aiff", ".aif", ".aac", ".flac", ".ogg"}
+PREFERRED_MUSIC_NAMES = (
+    "music.mp3",
+    "music.m4a",
+    "music.wav",
+    "background-music.mp3",
+    "background-music.m4a",
+    "soundtrack.mp3",
+    "soundtrack.m4a",
+)
+PREFERRED_SCRIPT_NAMES = (
+    "script.txt",
+    "script.md",
+    "narration.txt",
+    "narration.md",
+    "voiceover.txt",
+    "voiceover.md",
+    "slides.txt",
+    "slides.md",
+    "video-script.txt",
+    "video-script.md",
+)
+PREFERRED_SPEC_NAMES = (
+    "video-spec.json",
+    "video-spec.yaml",
+    "video-spec.yml",
+    "spec.json",
+    "spec.yaml",
+    "spec.yml",
+)
 
 
 class ToolError(RuntimeError):
@@ -214,6 +246,203 @@ def load_video_spec(path: Path) -> VideoSpec:
         tagline=_normalize_text(payload.get("tagline") or DEFAULT_TAGLINE),
         spec_path=path,
     )
+
+
+def _is_inside(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _relative_for_spec(path: Path, root: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(root.resolve()))
+    except ValueError:
+        return str(path.resolve())
+
+
+def _looks_like_video_spec(path: Path) -> bool:
+    if path.suffix.lower() not in {".json", ".yaml", ".yml"}:
+        return False
+    try:
+        payload = _load_structured_file(path)
+    except ToolError:
+        return False
+    shots = payload.get("shots") or payload.get("scenes")
+    return isinstance(shots, list) and bool(shots)
+
+
+def discover_spec(media_dir: Path) -> Optional[Path]:
+    for name in PREFERRED_SPEC_NAMES:
+        candidate = media_dir / name
+        if candidate.exists() and _looks_like_video_spec(candidate):
+            return candidate.resolve()
+
+    candidates: List[Path] = []
+    for pattern in ("*spec*.json", "*spec*.yaml", "*spec*.yml", "*.video.json", "*.video.yaml", "*.video.yml"):
+        candidates.extend(media_dir.glob(pattern))
+    for candidate in sorted(set(candidates)):
+        if _is_inside(candidate, media_dir / "generated"):
+            continue
+        if _looks_like_video_spec(candidate):
+            return candidate.resolve()
+    return None
+
+
+def discover_script(media_dir: Path) -> Optional[Path]:
+    for name in PREFERRED_SCRIPT_NAMES:
+        candidate = media_dir / name
+        if candidate.exists() and candidate.is_file():
+            return candidate.resolve()
+
+    candidates: List[Path] = []
+    for suffix in ("*.txt", "*.md"):
+        candidates.extend(media_dir.glob(suffix))
+    filtered = [
+        path
+        for path in candidates
+        if path.name.lower() not in {"readme.md", "license.txt"} and not _is_inside(path, media_dir / "generated")
+    ]
+    if not filtered:
+        return None
+    return sorted(filtered, key=lambda path: (-path.stat().st_size, path.name.lower()))[0].resolve()
+
+
+def discover_images(media_dir: Path) -> List[Path]:
+    roots = [media_dir / "source-images", media_dir / "images", media_dir]
+    images: List[Path] = []
+    seen: set[Path] = set()
+    for root in roots:
+        if not root.exists() or not root.is_dir():
+            continue
+        for path in sorted(root.rglob("*")):
+            if not path.is_file() or path.suffix.lower() not in SUPPORTED_IMAGE_EXTENSIONS:
+                continue
+            if _is_inside(path, media_dir / "generated"):
+                continue
+            resolved = path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            images.append(resolved)
+    return images
+
+
+def discover_music(media_dir: Path) -> Optional[Path]:
+    for name in PREFERRED_MUSIC_NAMES:
+        candidate = media_dir / name
+        if candidate.exists() and candidate.is_file():
+            return candidate.resolve()
+
+    roots = [media_dir / "music", media_dir / "audio"]
+    for root in roots:
+        if not root.exists() or not root.is_dir():
+            continue
+        music_files = [
+            path.resolve()
+            for path in sorted(root.rglob("*"))
+            if path.is_file() and path.suffix.lower() in SUPPORTED_AUDIO_EXTENSIONS
+        ]
+        if music_files:
+            return music_files[0]
+    return None
+
+
+def _strip_markdown_markup(text: str) -> str:
+    lines: List[str] = []
+    for raw_line in text.replace("\r\n", "\n").splitlines():
+        line = raw_line.strip()
+        line = re.sub(r"^#{1,6}\s+", "", line)
+        line = re.sub(r"^[-*+]\s+", "", line)
+        line = re.sub(r"^\d+[.)]\s+", "", line)
+        if line:
+            lines.append(line)
+    return "\n".join(lines)
+
+
+def _split_script_units(text: str) -> List[str]:
+    cleaned = _strip_markdown_markup(text)
+    paragraphs = [_normalize_text(part) for part in re.split(r"\n\s*\n+", cleaned) if _normalize_text(part)]
+    if len(paragraphs) > 1:
+        return paragraphs
+    sentences = [
+        _normalize_text(part)
+        for part in re.split(r"(?<=[.!?])\s+", cleaned.replace("\n", " "))
+        if _normalize_text(part)
+    ]
+    return sentences or [_normalize_text(cleaned)] if _normalize_text(cleaned) else []
+
+
+def _chunk_script(text: str, count: int) -> List[str]:
+    units = _split_script_units(text)
+    if not units:
+        return []
+    scene_count = max(1, count)
+    chunks: List[str] = []
+    for index in range(scene_count):
+        start = round(index * len(units) / scene_count)
+        end = round((index + 1) * len(units) / scene_count)
+        selected = units[start:end] or [units[min(index, len(units) - 1)]]
+        chunks.append(_normalize_text(" ".join(selected)))
+    return chunks
+
+
+def _short_body(text: str, limit: int = 150) -> str:
+    cleaned = _normalize_text(text)
+    if len(cleaned) <= limit:
+        return cleaned
+    shortened = cleaned[:limit].rsplit(" ", 1)[0].rstrip(".,;:")
+    return shortened + "."
+
+
+def make_spec_from_media(media_dir: Path, *, brand: str = "", tagline: str = "") -> Dict[str, Any]:
+    script_path = discover_script(media_dir)
+    images = discover_images(media_dir)
+    if script_path is not None:
+        script_text = script_path.read_text(encoding="utf-8").strip()
+        project_name = _headline_from_text(script_path.stem.replace("-", " "), "Codex Video")
+    else:
+        script_text = ""
+        project_name = "Codex Video"
+
+    if not script_text and not images:
+        raise ToolError(
+            f"No video inputs found in {media_dir}. Add a script.txt, narration.txt, video-spec.json, or source images."
+        )
+
+    scene_count = len(images) if images else max(4, min(8, len(_split_script_units(script_text)) or 4))
+    chunks = _chunk_script(script_text, scene_count)
+    if not chunks:
+        chunks = [path.stem.replace("-", " ").replace("_", " ") for path in images] or ["Scene"]
+
+    shots: List[Dict[str, Any]] = []
+    for index in range(scene_count):
+        chunk = chunks[index] if index < len(chunks) else chunks[-1]
+        image = images[index] if index < len(images) else None
+        headline = _headline_from_text(chunk or (image.stem if image else ""), f"Scene {index + 1:02d}")
+        shots.append(
+            {
+                "headline": headline,
+                "body": _short_body(chunk or headline),
+                "narration": chunk or headline,
+                "source_image": _relative_for_spec(image, media_dir) if image is not None else "",
+            }
+        )
+
+    narration_text = script_text or " ".join(shot["narration"] for shot in shots)
+    return {
+        "project_name": project_name,
+        "output_name": _slugify(project_name, default="codex-video"),
+        "brand": brand or DEFAULT_BRAND,
+        "tagline": tagline or DEFAULT_TAGLINE,
+        "narration_text": narration_text,
+        "shots": shots,
+        "_generated_by": TOOL_NAME,
+        "_source_script": str(script_path) if script_path else "",
+        "_source_image_count": len(images),
+    }
 
 
 def _font_candidates(bold: bool) -> List[Path]:
@@ -619,6 +848,23 @@ def _copy_audio_file(input_path: Path, output_dir: Path) -> Path:
     return output_path
 
 
+def _resolve_audio_file(raw: str, search_roots: Sequence[Path]) -> Path:
+    value = str(raw or "").strip()
+    if not value:
+        raise ToolError("Audio path is empty.")
+    candidate = Path(value).expanduser()
+    if candidate.is_absolute() and candidate.exists():
+        return candidate.resolve()
+    for root in search_roots:
+        path = (root / candidate).expanduser().resolve()
+        if path.exists() and path.is_file():
+            return path
+    resolved = candidate.resolve()
+    if resolved.exists() and resolved.is_file():
+        return resolved
+    raise ToolError(f"Audio file was not found: {raw}")
+
+
 def _synthesize_with_say(text_file: Path, output_dir: Path, *, voice: str, rate: Optional[int]) -> Path:
     say_bin = shutil.which("say")
     if not say_bin:
@@ -695,15 +941,100 @@ def _make_silent_audio(output_dir: Path, duration_seconds: float) -> Path:
     return output_path
 
 
+def _mix_narration_with_music(
+    *,
+    narration_path: Path,
+    music_path: Path,
+    output_dir: Path,
+    duration_seconds: float,
+    music_volume: float,
+    music_ducking: bool,
+) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / "narration-with-music.m4a"
+    volume = max(0.0, min(float(music_volume), 1.0))
+    if music_ducking:
+        filter_complex = (
+            "[0:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+            "loudnorm=I=-16:TP=-1.5:LRA=11,asplit=2[voice_mix][voice_key];"
+            f"[1:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume={volume:.4f}[music_in];"
+            "[music_in][voice_key]sidechaincompress=threshold=0.025:ratio=12:attack=25:release=700:makeup=1[ducked];"
+            "[voice_mix][ducked]amix=inputs=2:duration=first:dropout_transition=2,"
+            "alimiter=limit=0.95,aresample=48000[a]"
+        )
+    else:
+        filter_complex = (
+            "[0:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+            "loudnorm=I=-16:TP=-1.5:LRA=11[voice];"
+            f"[1:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume={volume:.4f}[music];"
+            "[voice][music]amix=inputs=2:duration=first:dropout_transition=2,"
+            "alimiter=limit=0.95,aresample=48000[a]"
+        )
+    _run(
+        [
+            _ffmpeg_bin(),
+            "-y",
+            "-i",
+            str(narration_path),
+            "-stream_loop",
+            "-1",
+            "-i",
+            str(music_path),
+            "-filter_complex",
+            filter_complex,
+            "-map",
+            "[a]",
+            "-t",
+            f"{duration_seconds:.3f}",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            str(output_path),
+        ]
+    )
+    if not output_path.exists() or output_path.stat().st_size == 0:
+        raise ToolError("Music mix failed to create an audio file.")
+    return output_path
+
+
 def prepare_audio(spec: VideoSpec, args: argparse.Namespace, bundle_dir: Path) -> Dict[str, Any]:
     audio_dir = bundle_dir / "assets/audio"
     narration_file = bundle_dir / "narration.txt"
     narration_file.parent.mkdir(parents=True, exist_ok=True)
     narration_file.write_text(spec.narration_text.strip() + "\n", encoding="utf-8")
 
+    search_roots = [Path.cwd()]
+    source_root = Path(getattr(args, "source_root", "")).expanduser().resolve() if getattr(args, "source_root", "") else None
+    if source_root is not None:
+        search_roots.insert(0, source_root)
+    if spec.spec_path is not None:
+        search_roots.insert(0, spec.spec_path.parent)
+
     if args.audio_file:
-        output_path = _copy_audio_file(Path(args.audio_file).expanduser().resolve(), audio_dir)
+        output_path = _copy_audio_file(_resolve_audio_file(args.audio_file, search_roots), audio_dir)
         provider = "audio-file"
+    elif args.tts_provider == "auto":
+        failures: List[str] = []
+        try:
+            output_path = _synthesize_with_speaches(
+                spec.narration_text,
+                audio_dir,
+                base_url=args.speaches_url,
+                model=args.speaches_model,
+                voice=args.tts_voice or DEFAULT_SPEACHES_VOICE,
+                response_format=args.speaches_format,
+                api_key=args.speaches_api_key,
+            )
+            provider = "speaches"
+        except ToolError as exc:
+            failures.append(f"Speaches: {exc}")
+            try:
+                output_path = _synthesize_with_say(narration_file, audio_dir, voice=args.tts_voice, rate=args.tts_rate)
+                provider = "say"
+            except ToolError as say_exc:
+                failures.append(f"say: {say_exc}")
+                raise ToolError("Auto TTS failed. " + " | ".join(failures)) from say_exc
     elif args.tts_provider == "say":
         output_path = _synthesize_with_say(narration_file, audio_dir, voice=args.tts_voice, rate=args.tts_rate)
         provider = "say"
@@ -726,13 +1057,43 @@ def prepare_audio(spec: VideoSpec, args: argparse.Namespace, bundle_dir: Path) -
         raise ToolError(f"Unsupported TTS provider: {args.tts_provider}")
 
     duration = _probe_duration_seconds(output_path)
+    narration_output_path = output_path
+    music_info: Dict[str, Any] = {
+        "enabled": False,
+        "source_path": "",
+        "volume": float(getattr(args, "music_volume", DEFAULT_MUSIC_VOLUME)),
+        "ducking": bool(getattr(args, "music_ducking", True)),
+        "mixed_output_path": "",
+        "balance_note": "Narration is normalized, music is kept low, music ducks under speech, and the final mix is limited.",
+    }
+    music_file = str(getattr(args, "music_file", "") or "").strip()
+    if music_file:
+        music_path = _resolve_audio_file(music_file, search_roots)
+        output_path = _mix_narration_with_music(
+            narration_path=narration_output_path,
+            music_path=music_path,
+            output_dir=audio_dir,
+            duration_seconds=duration,
+            music_volume=float(getattr(args, "music_volume", DEFAULT_MUSIC_VOLUME)),
+            music_ducking=bool(getattr(args, "music_ducking", True)),
+        )
+        duration = _probe_duration_seconds(output_path)
+        music_info.update(
+            {
+                "enabled": True,
+                "source_path": str(music_path),
+                "mixed_output_path": str(output_path),
+            }
+        )
     return {
         "provider": provider,
         "output_path": str(output_path),
+        "narration_output_path": str(narration_output_path),
         "duration_seconds": duration,
         "voice": args.tts_voice or "",
         "rate": args.tts_rate,
         "narration_file": str(narration_file),
+        "music": music_info,
     }
 
 
@@ -884,6 +1245,66 @@ def build_video(args: argparse.Namespace) -> Dict[str, Any]:
     return manifest
 
 
+def make_video_action(args: argparse.Namespace) -> Dict[str, Any]:
+    media_dir = Path(args.media_dir).expanduser().resolve()
+    media_dir.mkdir(parents=True, exist_ok=True)
+    requested_output = Path(args.output).expanduser().resolve() if args.output else None
+    if args.output_dir:
+        output_dir = Path(args.output_dir).expanduser().resolve()
+    elif requested_output is not None:
+        output_dir = requested_output.parent
+    else:
+        output_dir = media_dir / "generated"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    spec_path: Optional[Path]
+    if args.spec:
+        spec_path = Path(args.spec).expanduser().resolve()
+    else:
+        spec_path = discover_spec(media_dir)
+
+    generated_spec = False
+    if spec_path is None:
+        spec_payload = make_spec_from_media(media_dir, brand=args.brand, tagline=args.tagline)
+        spec_path = output_dir / "auto-video-spec.json"
+        _write_json(spec_path, spec_payload)
+        generated_spec = True
+
+    spec = load_video_spec(spec_path)
+    output_path = requested_output if requested_output is not None else output_dir / f"{spec.output_name}.mp4"
+    music_file = args.music_file
+    if not music_file:
+        discovered_music = discover_music(media_dir)
+        music_file = str(discovered_music) if discovered_music is not None else ""
+    build_args = argparse.Namespace(
+        spec=str(spec_path),
+        source_root=str(media_dir),
+        output_dir=str(output_dir),
+        output=str(output_path),
+        brand=args.brand,
+        tagline=args.tagline,
+        audio_file=args.audio_file,
+        music_file=music_file,
+        music_volume=args.music_volume,
+        music_ducking=args.music_ducking,
+        tts_provider=args.tts_provider,
+        tts_voice=args.tts_voice,
+        tts_rate=args.tts_rate,
+        speaches_url=args.speaches_url,
+        speaches_model=args.speaches_model,
+        speaches_format=args.speaches_format,
+        speaches_api_key=args.speaches_api_key,
+        seconds_per_scene=args.seconds_per_scene,
+    )
+    payload = build_video(build_args)
+    payload["action"] = "make"
+    payload["media_dir"] = str(media_dir)
+    payload["auto_generated_spec"] = generated_spec
+    payload["input_spec"] = str(spec_path)
+    payload["auto_discovered_music"] = bool(music_file and not args.music_file)
+    return payload
+
+
 def render_cards_action(args: argparse.Namespace) -> Dict[str, Any]:
     spec_path = Path(args.spec).expanduser().resolve()
     spec = load_video_spec(spec_path)
@@ -932,6 +1353,8 @@ def _render_text(payload: Mapping[str, Any]) -> str:
     if action == "build":
         render = payload.get("render") if isinstance(payload.get("render"), Mapping) else {}
         audio = payload.get("audio") if isinstance(payload.get("audio"), Mapping) else {}
+        music = audio.get("music") if isinstance(audio.get("music"), Mapping) else {}
+        music_line = "yes" if music.get("enabled") else "no"
         return "\n".join(
             [
                 f"{DISPLAY_NAME}: build complete",
@@ -939,6 +1362,24 @@ def _render_text(payload: Mapping[str, Any]) -> str:
                 f"Output: {render.get('output_path', '')}",
                 f"Cards: {len(payload.get('cards') or [])}",
                 f"Audio: {audio.get('provider', '')} ({float(audio.get('duration_seconds') or 0):.2f}s)",
+                f"Music: {music_line}",
+            ]
+        )
+    if action == "make":
+        render = payload.get("render") if isinstance(payload.get("render"), Mapping) else {}
+        audio = payload.get("audio") if isinstance(payload.get("audio"), Mapping) else {}
+        music = audio.get("music") if isinstance(audio.get("music"), Mapping) else {}
+        music_line = "yes" if music.get("enabled") else "no"
+        spec_label = "created" if payload.get("auto_generated_spec") else "found"
+        return "\n".join(
+            [
+                f"{DISPLAY_NAME}: video complete",
+                f"Project: {payload.get('project_name', '')}",
+                f"Output: {render.get('output_path', '')}",
+                f"Spec: {spec_label} {payload.get('input_spec', '')}",
+                f"Cards: {len(payload.get('cards') or [])}",
+                f"Audio: {audio.get('provider', '')} ({float(audio.get('duration_seconds') or 0):.2f}s)",
+                f"Music: {music_line}",
             ]
         )
     if action == "render-cards":
@@ -966,6 +1407,33 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=TOOL_NAME, description=DESCRIPTION)
     subparsers = parser.add_subparsers(dest="action", required=True)
 
+    make = subparsers.add_parser("make", help="Make a video from the media folder with the easiest defaults.")
+    make.add_argument("--media-dir", default=str(DEFAULT_MEDIA_DIR), help="Folder containing script/spec/images. Defaults to media.")
+    make.add_argument("--spec", default="", help="Optional JSON or YAML spec. If omitted, the tool searches media-dir.")
+    make.add_argument("--output-dir", default="", help="Root for generated bundles. Defaults to media-dir/generated.")
+    make.add_argument("--output", default="", help="Optional final MP4 path. Defaults to media-dir/generated/<project>.mp4.")
+    make.add_argument("--brand", default="", help="Override the header brand text.")
+    make.add_argument("--tagline", default="", help="Override the footer tagline.")
+    make.add_argument("--audio-file", default="", help="Existing narration audio file. Skips TTS when supplied.")
+    make.add_argument("--music-file", default="", help="Optional background music file. If omitted, make searches media/music.* and media/music/.")
+    make.add_argument("--music-volume", type=float, default=DEFAULT_MUSIC_VOLUME, help="Background music level before ducking. Default keeps voice clear.")
+    make.add_argument("--no-music-ducking", dest="music_ducking", action="store_false", help="Disable automatic music ducking under speech.")
+    make.set_defaults(music_ducking=True)
+    make.add_argument(
+        "--tts-provider",
+        choices=("auto", "say", "speaches", "silent"),
+        default=os.getenv("CODEX_VIDEO_TTS_PROVIDER", "auto"),
+        help="Narration backend. `auto` tries Speaches first, then macOS say.",
+    )
+    make.add_argument("--tts-voice", default=os.getenv("CODEX_VIDEO_TTS_VOICE", ""), help="Voice name/id for the selected TTS provider.")
+    make.add_argument("--tts-rate", type=int, default=None, help="macOS say speech rate in words per minute.")
+    make.add_argument("--speaches-url", default=os.getenv("SPEACHES_BASE_URL", DEFAULT_SPEACHES_URL), help="OpenAI-compatible Speaches base URL.")
+    make.add_argument("--speaches-model", default=os.getenv("SPEACHES_TTS_MODEL", DEFAULT_SPEACHES_MODEL), help="Speaches TTS model id.")
+    make.add_argument("--speaches-format", default=os.getenv("SPEACHES_TTS_FORMAT", "mp3"), help="Speaches audio response format.")
+    make.add_argument("--speaches-api-key", default=os.getenv("SPEACHES_API_KEY", ""), help="Optional Bearer token for a protected TTS endpoint.")
+    make.add_argument("--seconds-per-scene", type=float, default=5.0, help="Scene length used by the silent provider.")
+    make.add_argument("--format", choices=("json", "text"), default="text")
+
     build = subparsers.add_parser("build", help="Render cards, generate or attach narration, and compile a vertical MP4.")
     build.add_argument("--spec", required=True, help="JSON or YAML video spec.")
     build.add_argument("--source-root", default="", help="Optional image root for relative source_image paths.")
@@ -974,11 +1442,15 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--brand", default="", help="Override the header brand text.")
     build.add_argument("--tagline", default="", help="Override the footer tagline.")
     build.add_argument("--audio-file", default="", help="Existing narration audio file. Skips TTS when supplied.")
+    build.add_argument("--music-file", default="", help="Optional background music file.")
+    build.add_argument("--music-volume", type=float, default=DEFAULT_MUSIC_VOLUME, help="Background music level before ducking. Default keeps voice clear.")
+    build.add_argument("--no-music-ducking", dest="music_ducking", action="store_false", help="Disable automatic music ducking under speech.")
+    build.set_defaults(music_ducking=True)
     build.add_argument(
         "--tts-provider",
-        choices=("say", "speaches", "silent"),
-        default=os.getenv("CODEX_VIDEO_TTS_PROVIDER", "say"),
-        help="Narration backend. Use `speaches` for local Kokoro/Speaches, `say` for macOS, or `silent` for tests.",
+        choices=("auto", "say", "speaches", "silent"),
+        default=os.getenv("CODEX_VIDEO_TTS_PROVIDER", "auto"),
+        help="Narration backend. `auto` tries Speaches first, then macOS say.",
     )
     build.add_argument("--tts-voice", default=os.getenv("CODEX_VIDEO_TTS_VOICE", ""), help="Voice name/id for the selected TTS provider.")
     build.add_argument("--tts-rate", type=int, default=None, help="macOS say speech rate in words per minute.")
@@ -1010,7 +1482,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.action == "build":
+        if args.action == "make":
+            payload = make_video_action(args)
+        elif args.action == "build":
             payload = build_video(args)
         elif args.action == "render-cards":
             payload = render_cards_action(args)

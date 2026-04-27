@@ -6,6 +6,9 @@ A small, Codex-friendly app for turning a GPT-written script, a shot list, sourc
 
 The workflow is simple: GPT drafts the spec, you place images in `media/source-images/`, Codex runs this tool, and the finished MP4 lands in `media/generated/`.
 
+For the simplest guide, read `USER_MANUAL.md`.
+For pure copy/paste commands, read `CLI_COPY_PASTE.md`.
+
 ## Requirements
 
 - Python 3.9+
@@ -38,34 +41,39 @@ python3 scripts/create_demo_assets.py
 Build a silent demo video:
 
 ```bash
-python3 -m codex_video build \
-  --spec examples/demo-spec.json \
-  --source-root . \
-  --output media/generated/demo.mp4 \
-  --tts-provider silent
+python3 -m codex_video make --spec examples/demo-spec.json --media-dir . --output media/generated/demo.mp4 --tts-provider silent
 ```
 
 Build with Speaches TTS:
 
 ```bash
-python3 -m codex_video build \
-  --spec examples/demo-spec.json \
-  --source-root . \
-  --output media/generated/demo.mp4 \
-  --tts-provider speaches \
-  --tts-voice af_heart
+python3 -m codex_video make --spec examples/demo-spec.json --media-dir . --output media/generated/demo.mp4 --tts-provider speaches --tts-voice af_heart
 ```
 
 Build with macOS `say`:
 
 ```bash
-python3 -m codex_video build \
-  --spec examples/demo-spec.json \
-  --source-root . \
-  --output media/generated/demo.mp4 \
-  --tts-provider say \
-  --tts-voice Samantha
+python3 -m codex_video make --spec examples/demo-spec.json --media-dir . --output media/generated/demo.mp4 --tts-provider say --tts-voice Samantha
 ```
+
+## Easiest Real Use
+
+Put your voiceover in `media/script.txt`.
+Put images in `media/source-images/`.
+Optionally put music at `media/music.mp3` or in `media/music/`.
+Then run:
+
+```bash
+python3 -m codex_video make
+```
+
+Choose an output file:
+
+```bash
+python3 -m codex_video make --output media/generated/final-video.mp4
+```
+
+Music is balanced automatically: narration is normalized, music ducks under speech, and the final mix is limited.
 
 ## Media Layout
 
@@ -102,11 +110,7 @@ Give Codex the spec path, image folder, desired output path, and TTS preference.
 The main command:
 
 ```bash
-python3 -m codex_video build \
-  --spec media/my-video-spec.json \
-  --source-root media \
-  --output media/generated/my-video.mp4 \
-  --tts-provider speaches
+python3 -m codex_video make --output media/generated/my-video.mp4
 ```
 
 ## What The Tool Produces

@@ -1,6 +1,7 @@
 # CHARLES E MORGAN IV SOFTWARE * SEATTLE * WA
 import json
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,26 @@ def make_image(path: Path, color=(20, 80, 140)) -> None:
     draw.rectangle((80, 80, 560, 400), outline=(120, 220, 255), width=8)
     path.parent.mkdir(parents=True, exist_ok=True)
     image.save(path)
+
+
+def make_music(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=2",
+            "-ac",
+            "2",
+            str(path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
 
 
 def make_spec(tmp_path: Path) -> Path:
@@ -92,3 +113,71 @@ def test_build_silent_video(tmp_path: Path) -> None:
     assert output_path.exists()
     assert payload["validation"]["ok"] is True
     assert payload["audio"]["provider"] == "silent"
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg") or not shutil.which("ffprobe"), reason="ffmpeg is required")
+def test_make_from_media_folder(tmp_path: Path) -> None:
+    media = tmp_path / "media"
+    image_dir = media / "source-images"
+    make_image(image_dir / "image-01.png")
+    make_image(image_dir / "image-02.png", color=(80, 40, 120))
+    (media / "script.txt").write_text(
+        "The first scene introduces the video.\n\nThe second scene shows the result.",
+        encoding="utf-8",
+    )
+    output_path = media / "generated" / "final.mp4"
+    args = cli.build_parser().parse_args(
+        [
+            "make",
+            "--media-dir",
+            str(media),
+            "--output",
+            str(output_path),
+            "--tts-provider",
+            "silent",
+            "--seconds-per-scene",
+            "0.75",
+            "--format",
+            "json",
+        ]
+    )
+    payload = cli.make_video_action(args)
+    assert output_path.exists()
+    assert payload["action"] == "make"
+    assert payload["auto_generated_spec"] is True
+    assert payload["validation"]["ok"] is True
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg") or not shutil.which("ffprobe"), reason="ffmpeg is required")
+def test_make_auto_discovers_and_ducks_music(tmp_path: Path) -> None:
+    media = tmp_path / "media"
+    image_dir = media / "source-images"
+    make_image(image_dir / "image-01.png")
+    make_image(image_dir / "image-02.png", color=(80, 40, 120))
+    make_music(media / "music" / "theme.wav")
+    (media / "script.txt").write_text(
+        "The first scene introduces the video.\n\nThe second scene shows the result.",
+        encoding="utf-8",
+    )
+    output_path = media / "generated" / "with-music.mp4"
+    args = cli.build_parser().parse_args(
+        [
+            "make",
+            "--media-dir",
+            str(media),
+            "--output",
+            str(output_path),
+            "--tts-provider",
+            "silent",
+            "--seconds-per-scene",
+            "0.75",
+            "--format",
+            "json",
+        ]
+    )
+    payload = cli.make_video_action(args)
+    assert output_path.exists()
+    assert payload["auto_discovered_music"] is True
+    assert payload["audio"]["music"]["enabled"] is True
+    assert payload["audio"]["music"]["ducking"] is True
+    assert Path(payload["audio"]["music"]["mixed_output_path"]).exists()

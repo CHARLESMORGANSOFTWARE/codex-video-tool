@@ -4,7 +4,7 @@ This repo is built for the workflow you described:
 
 1. Ask GPT to write the video script and slide or shot plan.
 2. Put source images in `media/source-images/`.
-3. Put the generated spec in `media/` or `examples/`.
+3. Put the generated spec in `media/`, or put plain narration in `media/script.txt`.
 4. Ask Codex to run the video tool.
 5. Review the MP4 in `media/generated/`.
 
@@ -14,21 +14,29 @@ This repo is built for the workflow you described:
 Use this repo's Codex video tool to create a vertical social video.
 
 Inputs:
-- Spec: media/my-video-spec.json
-- Source images: media/source-images/
+- Script or spec: media/script.txt or media/video-spec.json
+- Images: media/source-images/
+- Optional music: media/music.mp3 or media/music/
 - Output: media/generated/my-video.mp4
 
-Use Speaches TTS if it is running, otherwise use macOS say. Render polished cards and compile the final MP4.
+Run:
+python3 -m codex_video make --output media/generated/my-video.mp4
+
+If music is present, use it. The tool balances it under the narration automatically.
 ```
 
 ## Build Commands
 
+Simplest:
+
+```bash
+python3 -m codex_video make
+```
+
 Use local Speaches or another OpenAI-compatible speech endpoint:
 
 ```bash
-python3 -m codex_video build \
-  --spec media/my-video-spec.json \
-  --source-root media \
+python3 -m codex_video make \
   --output media/generated/my-video.mp4 \
   --tts-provider speaches \
   --tts-voice af_heart
@@ -37,9 +45,7 @@ python3 -m codex_video build \
 Use the built-in macOS voice:
 
 ```bash
-python3 -m codex_video build \
-  --spec media/my-video-spec.json \
-  --source-root media \
+python3 -m codex_video make \
   --output media/generated/my-video.mp4 \
   --tts-provider say \
   --tts-voice Samantha
