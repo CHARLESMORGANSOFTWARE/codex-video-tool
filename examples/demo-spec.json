@@ -1,0 +1,33 @@
+{
+  "project_name": "Codex Video Tool Demo",
+  "output_name": "codex-video-tool-demo",
+  "brand": "Codex Video",
+  "tagline": "Script it. Stage it. Render it.",
+  "narration_text": "This is a short demo of the Codex video tool. GPT can draft the script and shot list. Codex can read the spec, use the images in the media folder, generate narration, render polished vertical cards, and compile a finished video into media generated. The workflow stays simple: write the story, add the visuals, run the build command, and review the MP4.",
+  "shots": [
+    {
+      "headline": "Start With A Script",
+      "body": "Write the narration and the shot list in one JSON file.",
+      "narration": "Start with a script and a clean shot list.",
+      "source_image": "../media/source-images/demo-01.png"
+    },
+    {
+      "headline": "Drop In Images",
+      "body": "Put screenshots, generated art, or product images under media/source-images.",
+      "narration": "Drop the source images into the media folder.",
+      "source_image": "../media/source-images/demo-02.png"
+    },
+    {
+      "headline": "Render The Cards",
+      "body": "The tool creates vertical scenes with a consistent social-video layout.",
+      "narration": "Codex renders every scene as a polished vertical card.",
+      "source_image": "../media/source-images/demo-03.png"
+    },
+    {
+      "headline": "Compile The MP4",
+      "body": "TTS narration and still cards become a share-ready H.264 video.",
+      "narration": "Then ffmpeg compiles the narration and cards into one MP4.",
+      "source_image": "../media/source-images/demo-04.png"
+    }
+  ]
+}

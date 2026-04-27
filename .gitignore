@@ -1,0 +1,23 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# Local media outputs can get large. Keep the folder structure, not generated renders.
+media/generated/*
+!media/generated/.gitkeep
+!media/generated/README.md
+media/source-images/*
+!media/source-images/.gitkeep
+!media/source-images/README.md
+
+# Local runtime state
+.codex-video/
+.telecodex/

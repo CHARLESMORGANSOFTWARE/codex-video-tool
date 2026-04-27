@@ -1,0 +1,28 @@
+# CHARLES E MORGAN IV SOFTWARE * SEATTLE * WA
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codex-video-tool"
+version = "0.1.0"
+description = "A Codex-friendly CLI for turning scripts, slide specs, source images, and TTS into vertical marketing videos."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+  { name = "Charles E Morgan IV Software, Seattle, WA" }
+]
+dependencies = [
+  "Pillow>=10.0",
+  "PyYAML>=6.0"
+]
+
+[project.scripts]
+codex-video = "codex_video.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["codex_video*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
