@@ -5,7 +5,7 @@ CHARLES E MORGAN IV SOFTWARE * SEATTLE * WA
 ## 1. Install
 
 ```bash
-git clone <YOUR_GITHUB_REPO_URL>
+git clone https://github.com/CHARLESMORGANSOFTWARE/codex-video-tool.git
 cd codex-video-tool
 python3 -m venv .venv
 . .venv/bin/activate
