@@ -16,9 +16,11 @@ For pure copy/paste commands, read `CLI_COPY_PASTE.md`.
 - Python packages from `pyproject.toml`
 - Optional: local Speaches/Kokoro TTS at `http://127.0.0.1:8000/v1`
 
-Install locally:
+Install:
 
 ```bash
+git clone https://github.com/CHARLESMORGANSOFTWARE/codex-video-tool.git
+cd codex-video-tool
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install -e .
