@@ -17,6 +17,9 @@ media/generated/*
 media/source-images/*
 !media/source-images/.gitkeep
 !media/source-images/README.md
+media/music/*
+!media/music/.gitkeep
+!media/music/README.md
 
 # Local runtime state
 .codex-video/
