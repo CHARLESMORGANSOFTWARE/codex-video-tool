@@ -2,6 +2,9 @@
 
 CHARLES E MORGAN IV SOFTWARE * SEATTLE * WA
 
+This takes text, pictures and music then uses text to speech to make a voice over, then publishes a fully finished video to a media folder. 
+Takes video creation and automates it in seconds. Its shocking how well it works. 
+
 A small, Codex-friendly app for turning a GPT-written script, a shot list, source images, and generated voiceover into a vertical marketing video.
 
 The workflow is simple: GPT drafts the spec, you place images in `media/source-images/`, Codex runs this tool, and the finished MP4 lands in `media/generated/`.
