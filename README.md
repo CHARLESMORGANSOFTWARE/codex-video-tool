@@ -11,6 +11,7 @@ The workflow is simple: GPT drafts the spec, you place images in `media/source-i
 
 For the simplest guide, read `USER_MANUAL.md`.
 For pure copy/paste commands, read `CLI_COPY_PASTE.md`.
+For local setup, GitHub CLI authentication, fork remotes, and pull request workflow, read `docs/PROJECT_SETUP.md`.
 
 ## Requirements
 
